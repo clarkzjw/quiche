@@ -410,7 +410,42 @@ pub fn connect(
                     conn_args.qpack_blocked_streams,
                     args.dump_json,
                     dgram_sender,
-                    Rc::clone(&output_sink),
+                    {
+                        if let Some(parent) = std::path::Path::new(&args.output_file).parent() {
+                            std::fs::create_dir_all(parent).ok();
+                        }
+
+                        let output_file = match std::fs::OpenOptions::new()
+                            .create(true)
+                            .write(true)
+                            .truncate(true)
+                            .open(&args.output_file)
+                        {
+                            Ok(file) => file,
+                            Err(e) => {
+                                eprintln!("Failed to open output file '{}': {}", args.output_file, e);
+                                // Fallback to a temporary file if the specified path fails
+                                let temp_path = format!("/tmp/quiche_output_{}.txt",
+                                    std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_secs());
+                                eprintln!("Using temporary file instead: {}", temp_path);
+                                std::fs::OpenOptions::new()
+                                    .create(true)
+                                    .write(true)
+                                    .open(temp_path)
+                                    .expect("Failed to open temporary output file")
+                            }
+                        };
+
+                        let output_file = Rc::new(RefCell::new(output_file));
+
+                        Rc::new(RefCell::new(move |s: String| {
+                            let mut file = output_file.borrow_mut();
+                            write!(file, "{}", s).expect("Failed to write to output file");
+                        }))
+                    },
                 ));
 
                 app_proto_selected = true;
